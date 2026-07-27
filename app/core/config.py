@@ -15,9 +15,10 @@ class Settings:
         self.GROQ_MODEL = os.getenv("GROQ_MODEL")
         self.GEMINI_MODEL = os.getenv("GEMINI_MODEL")
         self.DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", self.GEMINI_MODEL)
+        self.VOYAGE_API = os.getenv("VOYAGE_API")
         
+        self.MONGO_URI = os.getenv("MONGO_URI")
+        self.DB_NAME = os.getenv("DB_NAME")
 
-        # Retrieval
-        self.TOP_K = int(os.getenv("TOP_K", 4))
 
 settings = Settings()

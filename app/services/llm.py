@@ -10,6 +10,13 @@ class LLMService:
         if model is None:
             model = settings.DEFAULT_MODEL
 
+        # Determine API key based on model provider
+        api_key = None
+        if model and model.startswith("gemini/"):
+            api_key = settings.GEMINI_API_KEY
+        elif model and model.startswith("groq/"):
+            api_key = settings.GROQ_API_KEY
+
         response = completion(
             model=model,
             messages=[
@@ -24,7 +31,8 @@ class LLMService:
             ],
             stream=True,
             temperature=0.7,
-            max_tokens=300
+            max_tokens=300,
+            api_key=api_key,
         )
 
         for chunk in response:

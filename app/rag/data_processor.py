@@ -1,4 +1,5 @@
 import pandas as pd
+from datetime import datetime, timezone
 
 
 class DataProcessor:
@@ -98,31 +99,55 @@ class DataProcessor:
                 ascending=False
             )
 
-            postings = []
-
-            # Convert each row into text
-            for _, row in group.iterrows():
-                postings.append(
-                    self.row_to_chunk(row)
-                )
-
             # Create batches
-            for i in range(0, len(postings), batch_size):
-
-                batch = postings[i:i + batch_size]
+            for i in range(0, len(group), batch_size):
+                batch_df = group.iloc[i : i + batch_size]
+                
+                # Convert each row into text
+                postings = []
+                for _, row in batch_df.iterrows():
+                    postings.append(
+                        self.row_to_chunk(row)
+                    )
 
                 chunk_header = (
                     f"Job Role: {role}\n"
                     f"Batch Number: {i // batch_size + 1}\n"
-                    f"Number of Postings: {len(batch)}\n"
+                    f"Number of Postings: {len(postings)}\n"
                     "----------------------------------------\n"
                 )
 
-                chunk_body = "\n".join(batch)
+                chunk_body = "\n".join(postings)
+                text = chunk_header + chunk_body
 
-                row_chunks.append(
-                    chunk_header + chunk_body
-                )
+                # Compute statistics for this batch
+                salaries = batch_df["salary_usd"].astype(float)
+                min_salary = float(salaries.min())
+                max_salary = float(salaries.max())
+                avg_salary = float(salaries.mean())
+
+                locations = sorted(batch_df["company_location"].unique().tolist())
+                experience_levels = sorted(batch_df["experience_level"].unique().tolist())
+
+                batch_num = i // batch_size + 1
+                role_slug = str(role).lower().replace(" ", "_").replace("/", "_").replace("-", "_")
+                chunk_id = f"{role_slug}_batch_{batch_num}"
+
+                chunk_dict = {
+                    "_id": chunk_id,
+                    "job_title": role,
+                    "batch_number": batch_num,
+                    "num_postings": len(postings),
+                    "min_salary": min_salary,
+                    "max_salary": max_salary,
+                    "avg_salary": avg_salary,
+                    "locations": locations,
+                    "experience_levels": experience_levels,
+                    "text": text,
+                    "updated_at": datetime.now(timezone.utc)
+                }
+
+                row_chunks.append(chunk_dict)
 
         return row_chunks
 
