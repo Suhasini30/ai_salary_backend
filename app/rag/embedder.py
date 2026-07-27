@@ -1,81 +1,39 @@
-from sentence_transformers import SentenceTransformer
+import litellm
+from app.core.config import settings
 
 
 class Embedder:
+    """
+    Turns text into vectors (lists of numbers) so we can compare how
+    similar two pieces of text are by comparing their vectors.
 
-    def __init__(self, model_name="BAAI/bge-small-en-v1.5"):
+    Uses Google's Gemini embedding API (hosted, no local model to download).
+    """
+
+    def __init__(self, model_name: str = "voyage/voyage-4-large", dimensions: int = 1024):
         self.model_name = model_name
-        self._model = None
+        self.dimensions = dimensions
 
-    @property
-    def model(self):
-        """
-        Load the embedding model only once (lazy loading).
-        """
-        if self._model is None:
-            try:
-                self._model = SentenceTransformer(self.model_name)
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to load embedding model '{self.model_name}': {e}"
-                )
+    async def embed_texts(self, texts: list[str], batch_size: int = 100) -> list[list[float]]:
+        """Embeds many chunks at once — used during ingestion."""
+        embeddings = []
 
-        return self._model
-
-    def embed_chunks(self, chunks):
-        """
-        Generate embeddings for a list of text chunks.
-        """
-
-        if chunks is None:
-            raise ValueError("Chunks cannot be None.")
-
-        if not isinstance(chunks, list):
-            chunks = [chunks]
-
-        # Remove empty or invalid chunks
-        cleaned_chunks = [
-            str(chunk).strip()
-            for chunk in chunks
-            if chunk is not None and str(chunk).strip()
-        ]
-
-        if not cleaned_chunks:
-            return []
-
-        try:
-            embeddings = self.model.encode(
-                cleaned_chunks,
-                normalize_embeddings=True,
-                show_progress_bar=True
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start:start + batch_size]
+            response = await litellm.aembedding(
+                model=self.model_name,
+                input=batch,
+                api_key=settings.VOYAGE_API,
             )
+            embeddings.extend(item["embedding"] for item in response.data)
 
-            return embeddings
+        return embeddings
 
-        except Exception as e:
-            raise RuntimeError(
-                f"Error generating chunk embeddings: {e}"
-            )
-
-    def embed_query(self, query):
-        """
-        Generate embedding for a user query.
-        """
-
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError(
-                "Query must be a non-empty string."
-            )
-
-        try:
-            embedding = self.model.encode(
-                query.strip(),
-                normalize_embeddings=True
-            )
-
-            return embedding
-
-        except Exception as e:
-            raise RuntimeError(
-                f"Error generating query embedding: {e}"
-            )
+    async def embed_query(self, text: str) -> list[float]:
+        """Embeds a single piece of text — used for a user's question."""
+        response = await litellm.aembedding(
+            model=self.model_name,
+            input=[text],
+            api_key=settings.VOYAGE_API,
+        )
+        return response.data[0]["embedding"]

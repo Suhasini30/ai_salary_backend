@@ -1,10 +1,19 @@
 import time
-from app.services.llm import chat
+
+from app.services.llm import LLMService
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2
 
+_llm_service = LLMService()
+
+
 def retry(model: str, user: str):
+    """
+    Retries LLMService.chat() up to MAX_RETRIES times.
+    LLMService.chat() streams chunks, so we join them into a full
+    string here — this function returns complete text, not a generator.
+    """
 
     last_exception = None
 
@@ -13,7 +22,8 @@ def retry(model: str, user: str):
         try:
             print(f"Attempt {attempt} using {model}")
 
-            return chat(model, user)
+            # LLMService.chat(prompt, model) — prompt first, matching its signature
+            return "".join(_llm_service.chat(user, model))
 
         except Exception as e:
 
