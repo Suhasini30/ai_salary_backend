@@ -7,3 +7,6 @@ pandas
 faiss-cpu 
 litellm==1.82.6
 python-dotenv
+edge-tts
+langchain
+httpx

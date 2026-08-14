@@ -1,12 +1,12 @@
 import os
 import logging
 from app.services.retriever import Retriever
-from app.prompt.prompt_builder import PromptBuilder
 from app.services.llm import LLMService
 from app.rag.vector_store import VectorStore
 from app.rag.data_processor import DataProcessor
 from app.rag.embedder import Embedder
 from app.core.config import settings
+from app.orchestration.orchestrator import SalesOrchestrator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,8 +62,7 @@ class ChatService:
             logger.info("Vector database created successfully.")
 
         self.retriever = Retriever(vector_store)
-        self.prompt_builder = PromptBuilder()
-        self.llm_service = LLMService()
+        self.orchestrator = SalesOrchestrator(retriever=self.retriever)
 
         # Maps request-facing model_type -> actual model string from .env
         self.model_map = {
@@ -73,13 +72,6 @@ class ChatService:
 
     def chat(self, question, model_type="fast"):
 
-        results = self.retriever.retrieve(question)
-
-        prompt = self.prompt_builder.build_prompt(
-            question,
-            results
-        )
-
         model = self.model_map.get(model_type, settings.DEFAULT_MODEL)
 
-        return self.llm_service.chat(prompt, model)
+        yield from self.orchestrator.answer(question, model)
