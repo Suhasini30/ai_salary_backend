@@ -89,7 +89,8 @@ class LLMRouter:
                         {"role": "user", "content": ROUTER_USER_PROMPT.format(question=question)},
                     ],
                     "temperature": 0,
-                    "max_tokens": 120,
+                    "max_tokens": 512,
+                    "timeout": 30.0,
                 }
                 if api_key:
                     kwargs["api_key"] = api_key
@@ -99,9 +100,12 @@ class LLMRouter:
                 raw = response.choices[0].message.content or ""
                 extracted = _extract_json(raw)
                 if not extracted:
-                    raise ValueError(f"No valid JSON object extracted from model response: {raw!r}")
+                    raise ValueError(f"No JSON object found in response: {raw!r}")
 
-                payload = json.loads(extracted)
+                try:
+                    payload = json.loads(extracted)
+                except json.JSONDecodeError as je:
+                    raise ValueError(f"Model returned truncated/malformed JSON. Last payload: {raw!r} | error: {je}") from je
 
                 intent = str(payload.get("intent") or "").upper()
                 confidence = float(payload.get("confidence") or 0.0)
