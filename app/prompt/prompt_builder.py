@@ -5,29 +5,31 @@ class PromptBuilder:
 
     def build_prompt(self, query, results):
         context = ""
-
         for result in results:
-            context += result["chunk"] + "\n\n"
+            text = result.get("chunk") or result.get("text") or str(result)
+            context += text + "\n\n"
 
-        prompt = f"""
-Context:
+        prompt = f"""Context:
 {context}
 
 User Question:
 {query}
 """
-
         return prompt
 
     def build_router_prompt(self, question, rag_results, tool_text, decision):
         if rag_results:
-            rag_context = "\n".join(
-                result["chunk"] for result in rag_results
+            rag_context = "\n\n".join(
+                result.get("chunk") or result.get("text") or str(result)
+                for result in rag_results
+                if result
             )
         else:
-            rag_context = "No internal dataset context retrieved."
+            rag_context = "No MongoDB dataset context retrieved."
 
         tool_context = tool_text or "No live job search results."
+        intent = decision.get("intent", "GENERAL")
+        confidence_val = decision.get("confidence", 0.0)
 
         template = PromptTemplate(
             input_variables=[
@@ -35,7 +37,7 @@ User Question:
             ],
             template="""Route: {intent} (confidence {confidence})
 
-Internal Job Data:
+MongoDB Job Market Data:
 {rag_context}
 
 Live Job Search Results:
@@ -50,6 +52,6 @@ User Question:
             rag_context=rag_context,
             tool_context=tool_context,
             question=question,
-            intent=decision["intent"],
-            confidence=f"{float(decision['confidence']):.2f}",
+            intent=intent,
+            confidence=f"{float(confidence_val):.2f}",
         )
