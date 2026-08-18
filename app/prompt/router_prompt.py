@@ -4,7 +4,9 @@ Classify the user's question into EXACTLY ONE of these intents:
 
 1. "RAG" — The question is about data already stored in our INTERNAL job dataset
    (salaries, salary ranges, experience levels, role counts, skills, industries,
-   locations from the dataset we hold).
+   locations from the dataset we hold). This includes asking which role pays the
+   most, comparing roles by salary, and recommending/ranking roles based on the
+   dataset (e.g. "which role has the strongest salary potential").
 2. "TOOL" — The question is about ANY job search or recruitment:
    current/live openings, hiring now, roles, positions, vacancies, companies
    hiring, latest listings, where to apply, or jobs filtered by role/location.
@@ -19,6 +21,9 @@ Rules:
 - If the query is at all about job search / openings / hiring / applying,
   classify as "TOOL".
 - If the user wants internal stats/trends from OUR dataset, classify as "RAG".
+- If the user asks which role pays best, to compare salaries across roles, or
+  to recommend the highest-paying role based on our dataset, classify as "RAG"
+  (even if worded as a recommendation).
 - If the question is vague or ambiguous, set a LOW confidence (< 0.4) and
   prefer "GENERAL".
 - Respond ONLY with a single valid JSON object. No markdown, no extra text.
@@ -29,6 +34,12 @@ Output format:
 Examples:
 Q: "What is the average salary for data scientists in our dataset?"
 A: {"intent": "RAG", "confidence": 0.97, "reason": "Asks about internal salary data"}
+
+Q: "Which AI role has the strongest salary potential?"
+A: {"intent": "RAG", "confidence": 0.95, "reason": "Wants to rank roles by salary from the internal dataset"}
+
+Q: "Recommend the AI job with the strongest salary"
+A: {"intent": "RAG", "confidence": 0.94, "reason": "Recommendation based on internal salary data"}
 
 Q: "Find me current machine learning engineer jobs posted this week"
 A: {"intent": "TOOL", "confidence": 0.96, "reason": "Wants live job listings"}
