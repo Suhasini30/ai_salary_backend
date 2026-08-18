@@ -1,77 +1,64 @@
-import os
 import logging
-from app.services.retriever import Retriever
-from app.services.llm import LLMService
-from app.rag.vector_store import VectorStore
-from app.rag.data_processor import DataProcessor
-from app.rag.embedder import Embedder
+
 from app.core.config import settings
 from app.orchestration.orchestrator import SalesOrchestrator
+from app.rag.vector_store import VectorStore
+from app.services.retriever import Retriever
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class ChatService:
+    """
+    Coordinates chat requests: initializes MongoDB Atlas vector store,
+    retriever, and orchestrator, and streams responses.
 
-    def __init__(self, vector_store_folder="vector_db"):
-        vector_store = VectorStore()
-        
-        dataset_path = os.path.join("app", "data", "ai_job_dataset.csv")
-        index_path = os.path.join(vector_store_folder, "faiss.index")
-        chunks_path = os.path.join(vector_store_folder, "chunks.pkl")
+    IMPORTANT: instantiate this ONCE, after the app's event loop is running
+    (e.g. in a FastAPI startup event or as a module-level singleton created
+    after app import), not per-request and not at cold import time.
+    """
 
-        logger.info("Checking vector database...")
-        
-        if os.path.exists(vector_store_folder) and os.path.exists(index_path) and os.path.exists(chunks_path):
-            logger.info("Existing vector database found.")
-            logger.info("Loading FAISS index...")
-            vector_store.load(vector_store_folder)
-            logger.info("Vector database loaded successfully.")
-        else:
-            logger.info("Vector database not found. Rebuilding...")
-            os.makedirs(vector_store_folder, exist_ok=True)
-            
-            logger.info("Loading dataset...")
-            processor = DataProcessor(dataset_path)
-            try:
-                processor.load_data()
-                processor.validate_data()
-            except Exception as e:
-                raise RuntimeError(f"Dataset loading failed: {e}") from e
-            
-            logger.info("Creating chunks...")
-            chunks = processor.get_all_chunks()
-            
-            logger.info("Generating embeddings...")
-            embedder = Embedder()
-            try:
-                embeddings = embedder.embed_chunks(chunks)
-            except Exception as e:
-                raise RuntimeError(f"Embedding generation failed: {e}") from e
-            
-            logger.info("Building FAISS index...")
-            vector_store.add_embeddings(embeddings, chunks)
-            
-            logger.info("Saving vector database...")
-            try:
-                vector_store.save(vector_store_folder)
-            except Exception as e:
-                logger.error(f"Failed to save vector database: {e}")
-                raise
-            
-            logger.info("Vector database created successfully.")
+    def __init__(self):
+        logger.info("Initializing MongoDB Atlas VectorStore...")
+        logger.info(
+            "VectorStore config — db: %s | collection: %s | index: %s | dimensions: %d",
+            settings.MONGODB_DATABASE,
+            settings.MONGODB_COLLECTION,
+            settings.MONGODB_VECTOR_INDEX,
+            settings.VECTOR_DIMENSIONS,
+        )
+        try:
+            vector_store = VectorStore(
+                mongo_uri=settings.MONGO_URI,
+                db_name=settings.MONGODB_DATABASE,   # single source of truth
+                collection_name=settings.MONGODB_COLLECTION,
+                index_name=settings.MONGODB_VECTOR_INDEX,
+                dimensions=settings.VECTOR_DIMENSIONS,
+            )
+            self.retriever = Retriever(vector_store)
+            logger.info("MongoDB Atlas VectorStore and Retriever ready.")
+        except Exception as e:
+            logger.error("Failed to initialize MongoDB Atlas VectorStore: %s", e, exc_info=True)
+            self.retriever = Retriever(None)
 
-        self.retriever = Retriever(vector_store)
         self.orchestrator = SalesOrchestrator(retriever=self.retriever)
 
         # Maps request-facing model_type -> actual model string from .env
         self.model_map = {
             "fast": settings.GROQ_MODEL,
             "quality": settings.GEMINI_MODEL,
+            "xai": settings.XAI_MODEL,
+            "grok": settings.XAI_MODEL,
         }
 
-    def chat(self, question, model_type="fast"):
+    async def chat(self, question: str, model_type: str = "fast"):
+        """
+        Async generator — streams response chunks. Call with `async for`
+        from an async FastAPI route, e.g.:
 
+            async for chunk in chat_service.chat(question, model_type):
+                ...
+        """
         model = self.model_map.get(model_type, settings.DEFAULT_MODEL)
-
-        yield from self.orchestrator.answer(question, model)
+        async for chunk in self.orchestrator.answer(question, model):
+            yield chunk

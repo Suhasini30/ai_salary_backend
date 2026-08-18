@@ -12,8 +12,7 @@ Classify the user's question into EXACTLY ONE of these intents:
    to the internal dataset.
 3. "BOTH" — The question needs BOTH our internal dataset statistics AND live
    listings (e.g. "compare our dataset average with what's on the market now").
-4. "GENERAL" — Anything else: greetings, chit-chat, thanks, follow-ups,
-   questions about the assistant itself, or anything not related to jobs/salaries.
+4. "GENERAL" — Greetings, chit-chat, thanks, assistant-related questions, general knowledge, or unrelated queries. Job-related follow-ups should inherit the appropriate previous route when context makes the intent clear.
 
 Rules:
 - If the query is at all about job search / openings / hiring / applying,

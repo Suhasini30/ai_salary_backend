@@ -1,12 +1,13 @@
 fastapi
 uvicorn
 pydantic
-sentence-transformers
 numpy
 pandas
-faiss-cpu 
 litellm==1.82.6
 python-dotenv
 edge-tts
-langchain
+langchain-core
 httpx
+pymongo
+motor
+certifi
