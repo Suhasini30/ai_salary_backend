@@ -4,6 +4,9 @@ import os
 
 load_dotenv()
 
+# LiteLLM: skip loading the provider cost map at import time (saves ~10-20MB RAM).
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "False")
+
 def _clean_env(val: str | None) -> str | None:
     if not val:
         return None
