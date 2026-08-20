@@ -1,11 +1,46 @@
 import logging
 
+from app.core.config import settings
+from app.models.schemas import ChatEventType
 from app.prompt.prompt_builder import PromptBuilder
-from app.routers.llm_router import LLMRouter
+from app.prompt.rag_prompt import RAG_SYSTEM_PROMPT
+from app.prompt.system_prompt import GENERAL_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.services.llm_router import LLMRouter
 from app.services.llm import LLMService
 from app.tools.jsearch import JSearchTool
 
 logger = logging.getLogger(__name__)
+
+
+def _select_system_prompt(intent: str) -> str:
+    """Picks the system prompt that matches the routed intent.
+
+    RAG   → strict citations, anti-hallucination contract.
+    TOOL/BOTH → market assistant persona (live listings + apply links).
+    GENERAL → friendly general assistant that may answer from its own knowledge.
+    """
+    if intent == "RAG":
+        return RAG_SYSTEM_PROMPT
+    if intent in ("TOOL", "BOTH"):
+        return SYSTEM_PROMPT
+    return GENERAL_SYSTEM_PROMPT
+
+
+def _clean_sources(retrieved: list[dict]) -> list[dict]:
+    """Normalises retrieved chunks into the shape the frontend renders."""
+    cleaned = []
+    for r in retrieved:
+        cleaned.append(
+            {
+                "filename": r.get("filename") or "unknown",
+                "page": r.get("page"),
+                "chunk_index": r.get("chunk_index"),
+                "document_id": r.get("document_id"),
+                "score": r.get("score", 0.0),
+                "chunk_content": (r.get("chunk") or r.get("text") or "")[:600],
+            }
+        )
+    return cleaned
 
 
 class SalesOrchestrator:
@@ -16,12 +51,17 @@ class SalesOrchestrator:
         self.llm_service = llm_service or LLMService()
         self.prompt_builder = PromptBuilder()
 
-    async def answer(self, question, model):
+    async def answer(self, question, user=None):
         """
-        Async generator: classifies intent, retrieves RAG context (awaited,
-        no asyncio.run — reuses the running event loop so the long-lived
-        Motor client never gets orphaned), calls tools if needed, builds the
-        prompt, then streams the LLM response chunk by chunk.
+        Async generator yielding SSE event dicts:
+          meta → sources → token* → done
+
+        Per workflow.md:
+          1. classify intent (RAG / TOOL / BOTH / GENERAL),
+          2. retrieve RAG context when RAG/BOTH (scoped to the user),
+          3. call JSearch when TOOL/BOTH,
+          4. build the prompt,
+          5. stream the LLM response chunk by chunk.
         """
         decision = await self.router.classify(question)
         intent = decision.get("intent", "GENERAL")
@@ -31,28 +71,48 @@ class SalesOrchestrator:
             intent, decision.get("confidence", 0.0), decision.get("reason", ""),
         )
 
+        yield {
+            "event": ChatEventType.META.value,
+            "data": {
+                "intent": intent,
+                "confidence": decision.get("confidence", 0.0),
+            },
+        }
+
         rag_results = []
         tool_text = ""
 
         if intent in ("RAG", "BOTH"):
             try:
                 if self.retriever:
-                    rag_results = await self.retriever.retrieve(question)
+                    if user is not None and hasattr(self.retriever, "retrieve_for_user"):
+                        rag_results = await self.retriever.retrieve_for_user(question, user.id)
+                    else:
+                        rag_results = await self.retriever.retrieve(question)
             except Exception as e:
                 logger.error("MongoDB Atlas retrieval failed in orchestrator: %s", e, exc_info=True)
 
         if intent in ("TOOL", "BOTH"):
             try:
-                tool_text, ok = self.jsearch_tool.search_results(question)
+                tool_text, ok = await self.jsearch_tool.search_results(question)
                 if ok:
                     logger.info("JSearch tool returned live job listings.")
             except Exception as e:
                 logger.error("JSearch tool failed in orchestrator: %s", e, exc_info=True)
+
+        sources = _clean_sources(rag_results)
+        yield {
+            "event": ChatEventType.SOURCES.value,
+            "data": {"sources": sources, "intent": intent, "tool_text": tool_text},
+        }
 
         prompt = self.prompt_builder.build_router_prompt(
             question, rag_results, tool_text, decision
         )
         logger.info("Final LLM prompt built (len=%d chars).", len(prompt))
 
-        for chunk in self.llm_service.chat(prompt, model):
-            yield chunk
+        system_prompt = _select_system_prompt(intent)
+        async for chunk in self.llm_service.chat(prompt, system_prompt=system_prompt):
+            yield {"event": ChatEventType.TOKEN.value, "data": {"content": chunk}}
+
+        yield {"event": ChatEventType.DONE.value, "data": {"intent": intent}}

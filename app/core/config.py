@@ -90,6 +90,66 @@ class Settings:
         # Retrieval
         self.TOP_K = int(os.getenv("TOP_K", 4))
 
+        # ── Clerk (external identity provider) ──────────────────────────────
+        self.CLERK_SECRET_KEY = _clean_env(os.getenv("CLERK_SECRET_KEY"))
+        self.CLERK_JWKS_URL = _clean_env(os.getenv("CLERK_JWKS_URL"))
+        self.CLERK_ISSUER = _clean_env(os.getenv("CLERK_ISSUER"))
+
+        # If no JWKS URL is set, derive one from the Clerk issuer or frontend URL.
+        if not self.CLERK_JWKS_URL:
+            base = (self.CLERK_ISSUER or os.getenv("CLERK_FRONTEND_API_URL") or "").removesuffix("/")
+            if base:
+                self.CLERK_JWKS_URL = f"{base}/.well-known/jwks.json"
+
+        # If no issuer is set, derive one from the JWKS URL.
+        if not self.CLERK_ISSUER and self.CLERK_JWKS_URL and self.CLERK_JWKS_URL.endswith("/.well-known/jwks.json"):
+            self.CLERK_ISSUER = self.CLERK_JWKS_URL.removesuffix("/.well-known/jwks.json")
+
+        # ── Own JWT tokens (access + refresh) ───────────────────────────────
+        # Access token: sent by the frontend in the Authorization header.
+        # Refresh token: stored in an HttpOnly cookie and rotated on expiry.
+        self.JWT_SECRET_KEY = _clean_env(os.getenv("JWT_SECRET_KEY"))
+        if not self.JWT_SECRET_KEY:
+            raise RuntimeError(
+                "JWT_SECRET_KEY is required. Generate one with: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        self.JWT_ALGORITHM = _clean_env(os.getenv("JWT_ALGORITHM")) or "HS256"
+        # Recommended: short-lived access tokens (minutes) + long-lived refresh (days).
+        self.ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+        self.REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+        self.TOKEN_TYPE_ACCESS = "access"
+        self.TOKEN_TYPE_REFRESH = "refresh"
+
+        # ── HttpOnly cookie for the refresh token ───────────────────────────
+        self.COOKIE_NAME = _clean_env(os.getenv("COOKIE_NAME")) or "rag_refresh_token"
+        # 'lax' is required so the cookie is sent on top-level navigation; 'strict'
+        # is safer but breaks cross-site redirect redirects from Clerk.
+        self.COOKIE_SAMESITE = _clean_env(os.getenv("COOKIE_SAMESITE")) or "lax"
+        self.COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+        # Restrict the cookie to a single domain (optional; empty = host-only).
+        self.COOKIE_DOMAIN = _clean_env(os.getenv("COOKIE_DOMAIN"))
+        self.COOKIE_PATH = _clean_env(os.getenv("COOKIE_PATH")) or "/"
+
+        # ── Application / CORS ──────────────────────────────────────────────
+        # Comma-separated list of allowed browser origins (no trailing slashes).
+        self.FRONTEND_ORIGINS = [
+            o.strip() for o in os.getenv("FRONTEND_ORIGINS", "").split(",") if o.strip()
+        ] or ["http://localhost:3000", "http://127.0.0.1:3000"]
+        self.API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+
+        # ── Document uploads ────────────────────────────────────────────────
+        self.UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+        # Max size in bytes per uploaded file (default 25 MB).
+        self.MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024
+        # Allowed content types & extensions.
+        self.ALLOWED_EXTENSIONS = {
+            ".csv": "text/csv",
+        }
+        # Chunking
+        self.CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
+        self.CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))
+
     @staticmethod
     def format_model_identifier(model: str) -> str:
         """

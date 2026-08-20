@@ -1,0 +1,21 @@
+"""Marker package for the RAG app data models."""
+from app.models.schemas import (  # noqa: F401
+    AuthVerifyRequest,
+    ChatEventType,
+    ChatMessagePublic,
+    ChatRequest,
+    ConversationCreate,
+    ConversationDetail,
+    ConversationPublic,
+    DashboardStats,
+    DocumentListResponse,
+    DocumentPublic,
+    DocumentStatus,
+    HealthResponse,
+    ProfilePublic,
+    ProfileUpdate,
+    PublicUser,
+    SkillsUpdate,
+    TokenPairResponse,
+    VerifyResponse,
+)

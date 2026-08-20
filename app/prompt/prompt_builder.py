@@ -18,6 +18,12 @@ User Question:
         return prompt
 
     def build_router_prompt(self, question, rag_results, tool_text, decision):
+        intent = decision.get("intent", "GENERAL")
+
+        # GENERAL intent: no RAG/tool context was gathered — just the question.
+        if intent == "GENERAL":
+            return f"User Question:\n{question}"
+
         if rag_results:
             rag_context = "\n\n".join(
                 result.get("chunk") or result.get("text") or str(result)
@@ -28,7 +34,6 @@ User Question:
             rag_context = "No MongoDB dataset context retrieved."
 
         tool_context = tool_text or "No live job search results."
-        intent = decision.get("intent", "GENERAL")
         confidence_val = decision.get("confidence", 0.0)
 
         template = PromptTemplate(

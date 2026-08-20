@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 import certifi
@@ -55,29 +57,9 @@ class VectorStore:
     async def ensure_index(self):
         """
         Creates the Atlas Vector Search index if it doesn't exist, or
-        recreates it if the existing index has a mismatched dimension size.
+        recreates it if the existing index has a mismatched dimension size
+        or is missing the per-user filter fields.
         """
-        existing_indexes = await self.collection.list_search_indexes().to_list(length=None)
-        existing = next(
-            (idx for idx in existing_indexes if idx.get("name") == self.index_name),
-            None,
-        )
-
-        if existing:
-            existing_dims = (
-                existing.get("latestDefinition", {})
-                .get("fields", [{}])[0]
-                .get("numDimensions")
-            )
-            if existing_dims == self.dimensions:
-                logger.info(f"Vector index '{self.index_name}' already exists with matching dimensions.")
-                return
-            logger.warning(
-                f"Vector index '{self.index_name}' has {existing_dims} dims, "
-                f"expected {self.dimensions}. Dropping and recreating."
-            )
-            await self.collection.drop_search_index(self.index_name)
-
         index_model = {
             "name": self.index_name,
             "type": "vectorSearch",
@@ -89,19 +71,58 @@ class VectorStore:
                         "numDimensions": self.dimensions,
                         "similarity": "cosine",
                     },
+                    # Legacy job-dataset filters (kept for backwards compatibility).
                     {"type": "filter", "path": "job_title"},
                     {"type": "filter", "path": "min_salary"},
                     {"type": "filter", "path": "max_salary"},
                     {"type": "filter", "path": "avg_salary"},
+                    # Per-user RAG isolation filters.
+                    {"type": "filter", "path": "user_id"},
+                    {"type": "filter", "path": "document_id"},
+                    {"type": "filter", "path": "doc_type"},
                 ]
             },
         }
+
+        required_filter_paths = {"user_id", "document_id", "doc_type"}
+        existing_indexes = await self.collection.list_search_indexes().to_list(length=None)
+        existing = next(
+            (idx for idx in existing_indexes if idx.get("name") == self.index_name),
+            None,
+        )
+
+        if existing:
+            definition = existing.get("latestDefinition") or existing.get("definition") or {}
+            fields = definition.get("fields", [])
+            existing_dims = fields[0].get("numDimensions") if fields else None
+            existing_filter_paths = {
+                f.get("path") for f in fields if f.get("type") == "filter"
+            }
+
+            dims_ok = existing_dims == self.dimensions
+            filters_ok = required_filter_paths.issubset(existing_filter_paths)
+
+            if dims_ok and filters_ok:
+                logger.info(
+                    "Vector index '%s' already exists with matching dimensions and user filters.",
+                    self.index_name,
+                )
+                return
+
+            logger.warning(
+                "Vector index '%s' outdated (dims=%s expected=%s, filters=%s). Recreating.",
+                self.index_name,
+                existing_dims,
+                self.dimensions,
+                sorted(existing_filter_paths),
+            )
+            await self.collection.drop_search_index(self.index_name)
 
         await self.db.command({
             "createSearchIndexes": self.collection.name,
             "indexes": [index_model],
         })
-        logger.info(f"Created vector index '{self.index_name}' with {self.dimensions} dimensions.")
+        logger.info("Created vector index '%s' with %d dimensions and user filters.", self.index_name, self.dimensions)
 
     # ------------------------------------------------------------------
     # Sync / diff support
@@ -161,7 +182,8 @@ class VectorStore:
         """
         Runs Atlas Vector Search for the nearest chunks to query_vector.
         `filters` is an optional MongoDB match dict applied as a
-        pre-filter within $vectorSearch (e.g. {"min_salary": {"$gte": 100000}}).
+        pre-filter within $vectorSearch (e.g. {"min_salary": {"$gte": 100000}}
+        or {"user_id": ObjectId(...), "doc_type": "user_document"}).
         """
         vector_search_stage = {
             "index": self.index_name,
@@ -173,20 +195,179 @@ class VectorStore:
         if filters:
             vector_search_stage["filter"] = filters
 
+        # Project all fields the retriever / frontend sources panel needs.
+        project_fields = {
+            "text": 1,
+            "filename": 1,
+            "document_id": 1,
+            "page_number": 1,
+            "chunk_index": 1,
+            "user_id": 1,
+            "doc_type": 1,
+            "score": {"$meta": "vectorSearchScore"},
+            # legacy job fields (kept for the old dataset)
+            "job_title": 1,
+            "min_salary": 1,
+            "max_salary": 1,
+            "avg_salary": 1,
+        }
+
         pipeline = [
             {"$vectorSearch": vector_search_stage},
-            {
-                "$project": {
-                    "text": 1,
-                    "job_title": 1,
-                    "batch_number": 1,
-                    "min_salary": 1,
-                    "max_salary": 1,
-                    "avg_salary": 1,
-                    "score": {"$meta": "vectorSearchScore"},
-                }
-            },
+            {"$project": project_fields},
         ]
 
         cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=top_k)
+
+    async def text_search(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        filters: dict | None = None,
+    ) -> list[dict]:
+        """
+        Runs text / keyword search on MongoDB collection.
+        Matches keywords across text, job_title, and filename fields.
+        `filters` is an optional MongoDB match dict (scoping by user_id/doc_type).
+        """
+        if not query_text or not query_text.strip():
+            return []
+
+        project_fields = {
+            "text": 1,
+            "filename": 1,
+            "document_id": 1,
+            "page_number": 1,
+            "chunk_index": 1,
+            "user_id": 1,
+            "doc_type": 1,
+            "job_title": 1,
+            "min_salary": 1,
+            "max_salary": 1,
+            "avg_salary": 1,
+        }
+
+        match_criteria = {}
+        if filters:
+            match_criteria.update(filters)
+
+        # Build regex matching pattern for text search
+        words = [w.strip() for w in query_text.split() if len(w.strip()) > 2]
+        if words:
+            pattern = "|".join([r"\b" + re.escape(w) + r"\b" for w in words[:5]])
+        else:
+            pattern = re.escape(query_text)
+
+        text_filter = {
+            "$or": [
+                {"text": {"$regex": pattern, "$options": "i"}},
+                {"job_title": {"$regex": pattern, "$options": "i"}},
+                {"filename": {"$regex": pattern, "$options": "i"}},
+            ]
+        }
+
+        if "$or" in match_criteria:
+            combined_match = {"$and": [match_criteria, text_filter]}
+        else:
+            combined_match = {**match_criteria, **text_filter}
+
+        cursor = self.collection.find(combined_match, project_fields).limit(top_k)
+        results = await cursor.to_list(length=top_k)
+
+        for idx, doc in enumerate(results):
+            doc["score"] = 1.0 / (idx + 1)
+        return results
+
+    async def hybrid_search(
+        self,
+        query_text: str,
+        query_vector: list[float] | None = None,
+        top_k: int = 5,
+        num_candidates: int = 100,
+        filters: dict | None = None,
+        alpha: float = 0.5,
+        rrf_k: int = 60,
+    ) -> list[dict]:
+        """
+        Performs Hybrid Search using Reciprocal Rank Fusion (RRF) combining:
+        1. Dense Vector Similarity Search ($vectorSearch)
+        2. Keyword / Full-Text Search (Regex / Text Matching)
+
+        RRF Score Formula:
+          RRF_Score(doc) = alpha / (rrf_k + rank_vector) + (1 - alpha) / (rrf_k + rank_text)
+        """
+        candidate_k = max(top_k * 3, 20)
+
+        # Execute vector search & text search in parallel
+        async def _vec_task():
+            if not query_vector:
+                return []
+            try:
+                return await self.search(
+                    query_vector=query_vector,
+                    top_k=candidate_k,
+                    num_candidates=num_candidates,
+                    filters=filters,
+                )
+            except Exception as exc:
+                logger.warning("Vector search branch in hybrid_search failed: %s", exc)
+                return []
+
+        async def _text_task():
+            if not query_text:
+                return []
+            try:
+                return await self.text_search(
+                    query_text=query_text,
+                    top_k=candidate_k,
+                    filters=filters,
+                )
+            except Exception as exc:
+                logger.warning("Text search branch in hybrid_search failed: %s", exc)
+                return []
+
+        vector_results, text_results = await asyncio.gather(_vec_task(), _text_task())
+
+        if not vector_results and not text_results:
+            return []
+
+        if not text_results:
+            return vector_results[:top_k]
+
+        if not vector_results:
+            return text_results[:top_k]
+
+        # Reciprocal Rank Fusion (RRF)
+        doc_map = {}
+        rrf_scores = {}
+
+        # 1. Rank vector results
+        for rank, doc in enumerate(vector_results, start=1):
+            doc_id = str(doc["_id"])
+            doc_map[doc_id] = doc
+            rrf_scores[doc_id] = alpha / (rrf_k + rank)
+
+        # 2. Rank text results
+        for rank, doc in enumerate(text_results, start=1):
+            doc_id = str(doc["_id"])
+            if doc_id not in doc_map:
+                doc_map[doc_id] = doc
+
+            text_score = (1.0 - alpha) / (rrf_k + rank)
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + text_score
+
+        # 3. Sort by aggregated RRF score descending
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda d_id: rrf_scores[d_id], reverse=True)
+
+        fused_results = []
+        for doc_id in sorted_ids[:top_k]:
+            doc = doc_map[doc_id]
+            doc["score"] = rrf_scores[doc_id]
+            fused_results.append(doc)
+
+        logger.info(
+            "Hybrid search fused %d vector & %d text candidates -> %d top results.",
+            len(vector_results), len(text_results), len(fused_results)
+        )
+        return fused_results

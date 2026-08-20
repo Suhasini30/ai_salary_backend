@@ -1,0 +1,1 @@
+"""Auth package: Clerk handshake, token creation, current-user dependency."""

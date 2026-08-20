@@ -1,5 +1,5 @@
+import asyncio
 import logging
-import time
 
 import httpx
 from langchain_core.tools import tool
@@ -25,7 +25,7 @@ FILLER_WORDS = {
 # Country/city tokens used both for the JSearch country filter and to strip
 # location words out of the keyword query so "AI jobs in germany" searches "ai".
 COUNTRY_TOKENS = {
-    "us": ["usa", "america", "united states", "new york", "san francisco", "california",
+    "us": ["us", "usa", "america", "united states", "new york", "san francisco", "california",
            "texas", "washington", "seattle", "chicago", "arlington", "dc"],
     "in": ["india", "chennai", "bangalore", "bengaluru", "hyderabad", "mumbai",
            "delhi", "pune", "kolkata", "gurgaon", "noida", "ahmedabad"],
@@ -102,9 +102,15 @@ def _pick_date_posted(query):
 def _pick_country(query):
     """Map country names/cities in the query to a JSearch country code."""
     q = query.lower()
+    words = set(q.split())
     for code, tokens in COUNTRY_TOKENS.items():
-        if any(k in q for k in tokens):
-            return code
+        for tok in tokens:
+            # Bare country codes ("us", "uk") must match as whole words to avoid
+            # false positives inside words like "business" or "chunk".
+            if tok in words:
+                return code
+            if len(tok) > 2 and tok in q:
+                return code
     return ""
 
 
@@ -128,12 +134,12 @@ def _clean_query(query):
     return " ".join(kept) if kept else ""
 
 
-def _fetch_jobs(params, headers):
+async def _fetch_jobs(params, headers):
     """Single HTTP attempt (with retry & backoff). Returns the jobs list."""
-    with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = client.get(
+                response = await client.get(
                     f"{settings.JSEARCH_BASE_URL}/search-v2",
                     params=params,
                     headers=headers,
@@ -148,10 +154,10 @@ def _fetch_jobs(params, headers):
                     raise
                 wait = 1.5 * (2 ** attempt)
                 logger.info("JSearch request attempt %d failed (%s); retrying in %.1fs...", attempt + 1, e, wait)
-                time.sleep(wait)
+                await asyncio.sleep(wait)
 
 
-def _call_jsearch(query):
+async def _call_jsearch(query):
     if not settings.JSEARCH_API_KEY:
         raise RuntimeError(
             "JSEARCH_API_KEY is not set. Add it to .env to enable live job search."
@@ -196,7 +202,7 @@ def _call_jsearch(query):
             params["date_posted"] = date_posted
 
         try:
-            jobs = _fetch_jobs(params, headers)
+            jobs = await _fetch_jobs(params, headers)
         except Exception as e:
             last_error = e
             logger.warning("JSearch attempt (%r, %r) failed: %s", keywords, cntry, e)
@@ -212,10 +218,10 @@ def _call_jsearch(query):
 
 
 @tool("JSearchJobSearch", description="Search LIVE current job postings using the JSearch (RapidAPI) jobs API. Use it when the user wants job openings, companies hiring now, or live listings. Returns formatted listings with company, location, salary and apply link.")
-def jsearch_tool(query: str) -> str:
+async def jsearch_tool(query: str) -> str:
     """Search live job postings. Pass the user's job search query."""
     try:
-        return _call_jsearch(query)
+        return await _call_jsearch(query)
     except Exception as e:
         logger.warning("JSearch call failed: %s", e, exc_info=True)
         return f"Live job search is currently unavailable: {e}"
@@ -224,14 +230,14 @@ def jsearch_tool(query: str) -> str:
 class JSearchTool:
     """Thin wrapper so the orchestrator can invoke the LangChain tool."""
 
-    def search(self, query):
+    async def search(self, query):
         # LangChain @tool .invoke() requires a dict for named-arg tools
-        return jsearch_tool.invoke({"query": query})
+        return await jsearch_tool.ainvoke({"query": query})
 
-    def search_results(self, query):
+    async def search_results(self, query):
         """Returns (formatted_text, ok_flag). ok_flag is False on failure."""
         try:
-            result = _call_jsearch(query)
+            result = await _call_jsearch(query)
             return result, True
         except Exception as e:
             logger.warning("JSearch call failed: %s", e, exc_info=True)
