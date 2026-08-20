@@ -1,0 +1,1 @@
+"""Service layer: embedding, LLM, retrieval, chat, dashboard."""

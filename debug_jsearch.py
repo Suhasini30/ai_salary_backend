@@ -145,9 +145,10 @@ print("\n" + "="*55)
 print("  STEP 4: JSearchTool wrapper (search_results)")
 print("="*55)
 try:
+    import asyncio
     from app.tools.jsearch import JSearchTool
     tool = JSearchTool()
-    text, ok = tool.search_results("python developer jobs")
+    text, ok = asyncio.run(tool.search_results("python developer jobs"))
     print(f"  ok flag  : {ok}")
     print(f"  result   : {text[:300]}")
     if ok:
@@ -169,7 +170,8 @@ print("="*55)
 try:
     from app.routers.llm_router import LLMRouter
     router = LLMRouter()
-    decision = router.classify("Find me python developer jobs right now")
+    import asyncio
+    decision = asyncio.run(router.classify("Find me python developer jobs right now"))
     print(f"  intent     : {decision['intent']}")
     print(f"  confidence : {decision['confidence']}")
     print(f"  reason     : {decision['reason']}")
@@ -190,14 +192,15 @@ print("\n" + "="*55)
 print("  STEP 6: LangChain @tool .invoke() call")
 print("="*55)
 try:
+    import asyncio
     from app.tools.jsearch import jsearch_tool
-    result = jsearch_tool.invoke({"query": "python developer jobs"})
+    result = asyncio.run(jsearch_tool.ainvoke({"query": "python developer jobs"}))
     print(f"  Result: {result[:300]}")
     if "unavailable" in result.lower():
         print(f"{WARN} Tool returned fallback message (API issue, not code issue)")
-        issues.append("jsearch_tool.invoke() returned fallback -- JSearch API not working")
+        issues.append("jsearch_tool.ainvoke() returned fallback -- JSearch API not working")
     else:
-        print(f"{PASS} jsearch_tool.invoke() returned real results")
+        print(f"{PASS} jsearch_tool.ainvoke() returned real results")
 except Exception as e:
     print(f"{FAIL} jsearch_tool.invoke() threw exception: {e}")
     issues.append(f"jsearch_tool.invoke() exception: {e}")

@@ -11,3 +11,6 @@ httpx
 pymongo
 motor
 certifi
+python-multipart
+PyJWT
+cryptography
