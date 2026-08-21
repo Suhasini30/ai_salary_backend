@@ -107,6 +107,68 @@ async def completion_percent(user_id: str) -> int:
     return round(filled / (len(weights) + 1) * 100)
 
 
+async def _build_user_query(user_id: str) -> dict:
+    try:
+        obj_id = ObjectId(user_id)
+        return {"$or": [{"user_id": obj_id}, {"user_id": user_id}]}
+    except Exception:
+        return {"user_id": user_id}
+
+
+async def set_github_oauth(user_id: str, access_token: str, github_username: str) -> bool:
+    """Saves the user's GitHub OAuth access token and username."""
+    query = await _build_user_query(user_id)
+    now = _utcnow()
+    res = await _p().update_one(
+        query,
+        {
+            "$set": {
+                "user_id": ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id,
+                "github_access_token": access_token,
+                "github_username": github_username,
+                "github_connected_at": now,
+                "updated_at": now,
+            }
+        },
+        upsert=True,
+    )
+    return res.acknowledged
+
+
+async def get_github_oauth(user_id: str) -> dict | None:
+    """Retrieves GitHub OAuth credentials for a user."""
+    query = await _build_user_query(user_id)
+    doc = await _p().find_one(
+        query,
+        {"github_access_token": 1, "github_username": 1, "github_connected_at": 1},
+    )
+    if not doc or not doc.get("github_access_token"):
+        return None
+
+    return {
+        "access_token": doc["github_access_token"],
+        "github_username": doc.get("github_username", ""),
+        "connected_at": doc.get("github_connected_at"),
+    }
+
+
+async def remove_github_oauth(user_id: str) -> bool:
+    """Removes the stored GitHub OAuth credentials for a user."""
+    query = await _build_user_query(user_id)
+    res = await _p().update_one(
+        query,
+        {
+            "$unset": {
+                "github_access_token": "",
+                "github_username": "",
+                "github_connected_at": "",
+            },
+            "$set": {"updated_at": _utcnow()},
+        },
+    )
+    return res.acknowledged
+
+
 async def enrich_with_account(profile: ProfilePublic) -> ProfilePublic:
     """Adds joined-from-`users` info (email, verified, joined date) for the profile page."""
     user_doc = await users_collection().find_one(

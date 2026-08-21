@@ -1,13 +1,13 @@
 """
-GitHub MCP tool runner.
+GitHub MCP tool runner with dynamic OAuth token support.
 
 Invokes tools from the GitHub Remote MCP server (loaded by `app.mcp.client`)
-to answer GitHub-related questions with LIVE data — e.g. "list my repositories".
+to answer GitHub-related questions with LIVE user data — e.g. "list my repositories".
 """
 import json
 import logging
 
-from app.mcp.client import get_tools
+from app.mcp.client import get_tools_for_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +31,18 @@ def _looks_github(question: str) -> bool:
     return any(k in q for k in _GITHUB_KEYWORDS)
 
 
-async def run_github_tools(question: str) -> str:
+async def run_github_tools(question: str, github_token: str | None = None) -> str:
     """
-    If the question is GitHub-related, invokes the remote MCP tools and
-    returns a plain-text snippet with live data. Returns "" when there is
-    nothing to fetch or MCP tools are unavailable.
+    If the question is GitHub-related, invokes the remote MCP tools using the user's
+    GitHub OAuth token and returns a plain-text snippet with live user data.
+    Returns "" when there is nothing to fetch or MCP tools are unavailable.
     """
-    tools = get_tools()
-    if not tools or not _looks_github(question):
+    if not _looks_github(question):
+        return ""
+
+    tools = await get_tools_for_token(github_token)
+    if not tools:
+        logger.warning("No GitHub MCP tools loaded for question.")
         return ""
 
     me = _tool(tools, "get_me")
