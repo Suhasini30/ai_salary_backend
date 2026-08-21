@@ -17,12 +17,8 @@ User Question:
 """
         return prompt
 
-    def build_router_prompt(self, question, rag_results, tool_text, decision):
+    def build_router_prompt(self, question, rag_results, tool_text, decision, mcp_text=""):
         intent = decision.get("intent", "GENERAL")
-
-        # GENERAL intent: no RAG/tool context was gathered — just the question.
-        if intent == "GENERAL":
-            return f"User Question:\n{question}"
 
         if rag_results:
             rag_context = "\n\n".join(
@@ -34,11 +30,47 @@ User Question:
             rag_context = "No MongoDB dataset context retrieved."
 
         tool_context = tool_text or "No live job search results."
+        mcp_context = mcp_text or "No active MCP tools loaded."
         confidence_val = decision.get("confidence", 0.0)
+
+        # MCP intent: answer from live GitHub data.
+        if intent == "MCP":
+            return f"""You are a helpful assistant with live access to the user's GitHub data via the Model Context Protocol (MCP).
+
+GitHub Live Data:
+{mcp_context}
+
+User Question:
+{question}
+
+Rules:
+- Answer using the GitHub Live Data above. When listing repositories include
+  names, links, languages, and star counts.
+- If the data is empty, say clearly that GitHub data could not be fetched.
+- Never invent repositories, stars, or URLs that are not in the data.
+"""
+
+        # GENERAL intent with MCP context
+        if intent == "GENERAL":
+            return f"""You are a helpful assistant with live tool access via the GitHub Model Context Protocol (MCP).
+
+GitHub Live Data:
+{mcp_context}
+
+User Question:
+{question}
+
+Rules:
+- If GitHub Live Data is present and relevant, answer using it directly and
+  accurately (e.g. list the repositories with names, links, languages, stars).
+- If the data is empty or irrelevant to the question, answer normally from your
+  own knowledge.
+- Never claim to access GitHub when the data is absent.
+"""
 
         template = PromptTemplate(
             input_variables=[
-                "rag_context", "tool_context", "question", "intent", "confidence"
+                "rag_context", "tool_context", "mcp_context", "question", "intent", "confidence"
             ],
             template="""Route: {intent} (confidence {confidence})
 
@@ -48,6 +80,9 @@ MongoDB Job Market Data:
 Live Job Search Results:
 {tool_context}
 
+Model Context Protocol (MCP) Integration:
+{mcp_context}
+
 User Question:
 {question}
 """,
@@ -56,6 +91,7 @@ User Question:
         return template.format(
             rag_context=rag_context,
             tool_context=tool_context,
+            mcp_context=mcp_context,
             question=question,
             intent=intent,
             confidence=f"{float(confidence_val):.2f}",

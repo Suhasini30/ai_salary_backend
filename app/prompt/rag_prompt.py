@@ -24,10 +24,11 @@ Rules you MUST follow:
 """
 
 
-def build_rag_prompt(question: str, retrieved: list[dict], tool_text: str = "") -> str:
+def build_rag_prompt(question: str, retrieved: list[dict], tool_text: str = "", mcp_text: str = "") -> str:
     """
     Serializes the retrieved chunks (bound to citations [1..n]) plus the
-    user's question into a single model prompt.
+    user's question into a single model prompt. `tool_text` carries live job
+    search results; `mcp_text` carries live GitHub MCP data.
     """
     parts = []
 
@@ -44,6 +45,9 @@ def build_rag_prompt(question: str, retrieved: list[dict], tool_text: str = "") 
 
     if tool_text:
         parts.append(f"Live Job Search Results:\n{tool_text}")
+
+    if mcp_text:
+        parts.append(f"GitHub Live Data (from the GitHub MCP server):\n{mcp_text}")
 
     context = "\n\n".join(parts)
 

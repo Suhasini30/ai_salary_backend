@@ -8,7 +8,7 @@ from app.prompt.router_prompt import ROUTER_SYSTEM_PROMPT, ROUTER_USER_PROMPT
 
 logger = logging.getLogger(__name__)
 
-VALID_INTENTS = {"RAG", "TOOL", "BOTH", "GENERAL"}
+VALID_INTENTS = {"RAG", "MCP", "TOOL", "BOTH", "GENERAL"}
 
 
 def _extract_json(text):
