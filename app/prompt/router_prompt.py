@@ -8,17 +8,25 @@ Classify the user's question into EXACTLY ONE of these intents:
    most, comparing roles by salary, the common skills required for a role, and
    recommending/ranking roles based on the dataset (e.g. "which role has the
    strongest salary potential").
-2. "TOOL" — The question is about ANY job search or recruitment:
+2. "MCP" — The question is about LIVE GitHub data: repositories, stars, forks,
+   languages, commits, pull requests, issues, branches, or anything about the
+   user's GitHub account/activity (e.g. "list my repositories", "how many stars
+   does my X repo have", "show my latest commits"). Questions containing
+   GitHub, repo/repository, star/fork, commit, pull request, issue, or branch
+   should be classified as "MCP".
+3. "TOOL" — The question is about ANY job search or recruitment:
    current/live openings, hiring now, roles, positions, vacancies, companies
    hiring, latest listings, where to apply, or jobs filtered by role/location.
    If the user is searching for a job, choose "TOOL" — never route job searches
    to the internal dataset.
-3. "BOTH" — The question needs BOTH our internal dataset statistics AND live
+4. "BOTH" — The question needs BOTH our internal dataset statistics AND live
    listings (e.g. "compare our dataset average with what's on the market now").
-4. "GENERAL" — Anything else: greetings, chit-chat, thanks, follow-ups,
+5. "GENERAL" — Anything else: greetings, chit-chat, thanks, follow-ups,
    questions about the assistant itself, or anything not related to jobs/salaries.
 
 Rules:
+- If the query mentions GitHub or repository/star/fork/commit/issue/branch,
+  classify as "MCP".
 - If the query is at all about job search / openings / hiring / applying,
   classify as "TOOL".
 - If the user wants internal stats/trends from OUR dataset, or asks what
@@ -45,6 +53,15 @@ A: {"intent": "RAG", "confidence": 0.94, "reason": "Recommendation based on inte
 
 Q: "What skills are commonly listed for a data analyst role in our data?"
 A: {"intent": "RAG", "confidence": 0.93, "reason": "Asks for role skills from the internal dataset"}
+
+Q: "List my GitHub repositories"
+A: {"intent": "MCP", "confidence": 0.98, "reason": "Wants live data about the user's GitHub repositories"}
+
+Q: "How many stars does my DESIGN-PROJECT repo have?"
+A: {"intent": "MCP", "confidence": 0.96, "reason": "Asks about a specific repository's live GitHub data"}
+
+Q: "Show my latest GitHub commits"
+A: {"intent": "MCP", "confidence": 0.95, "reason": "Wants live commit data from GitHub"}
 
 Q: "Find me current machine learning engineer jobs posted this week"
 A: {"intent": "TOOL", "confidence": 0.96, "reason": "Wants live job listings"}

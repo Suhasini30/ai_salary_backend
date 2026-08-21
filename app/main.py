@@ -42,7 +42,22 @@ async def lifespan(app: FastAPI):
         await asyncio.wait_for(ensure_vector_index(), timeout=10.0)
     except Exception as exc:
         logger.warning("Vector index setup timed out or deferred: %s", exc)
+
+    # Initialize remote MCP client connections
+    try:
+        from app.mcp import connect as mcp_connect, disconnect as mcp_disconnect
+        await mcp_connect()
+    except Exception as exc:
+        logger.warning("MCP initialization error: %s", exc)
+
     yield
+
+    try:
+        from app.mcp import disconnect as mcp_disconnect
+        await mcp_disconnect()
+    except Exception as exc:
+        logger.warning("MCP shutdown error: %s", exc)
+
     await close_client()
     logger.info("SHUTDOWN: RAG application stopped")
 

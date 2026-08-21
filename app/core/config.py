@@ -22,6 +22,10 @@ class Settings:
         self.XAI_API_KEY = _clean_env(os.getenv("XAI_API_KEY"))
         self.MISTRAL_API_KEY = _clean_env(os.getenv("MISTRAL_API_KEY"))
 
+        # GitHub OAuth & MCP
+        self.GITHUB_PAT = _clean_env(os.getenv("GITHUB_PAT"))
+        self.GITHUB_MCP_SERVER_URL = _clean_env(os.getenv("GITHUB_MCP_SERVER_URL")) or "https://api.githubcopilot.com/mcp/"
+
         # Sync non-empty API keys to environment for LiteLLM
         if self.GROQ_API_KEY:
             os.environ["GROQ_API_KEY"] = self.GROQ_API_KEY

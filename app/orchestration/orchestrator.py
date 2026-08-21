@@ -17,7 +17,7 @@ def _select_system_prompt(intent: str) -> str:
 
     RAG   → strict citations, anti-hallucination contract.
     TOOL/BOTH → market assistant persona (live listings + apply links).
-    GENERAL → friendly general assistant that may answer from its own knowledge.
+    MCP/GENERAL → friendly general assistant that may answer from its own knowledge.
     """
     if intent == "RAG":
         return RAG_SYSTEM_PROMPT
@@ -57,11 +57,12 @@ class SalesOrchestrator:
           meta → sources → token* → done
 
         Per workflow.md:
-          1. classify intent (RAG / TOOL / BOTH / GENERAL),
+          1. classify intent (RAG / MCP / TOOL / BOTH / GENERAL),
           2. retrieve RAG context when RAG/BOTH (scoped to the user),
           3. call JSearch when TOOL/BOTH,
-          4. build the prompt,
-          5. stream the LLM response chunk by chunk.
+          4. call the GitHub MCP tools when MCP,
+          5. build the prompt,
+          6. stream the LLM response chunk by chunk.
         """
         decision = await self.router.classify(question)
         intent = decision.get("intent", "GENERAL")
@@ -81,6 +82,7 @@ class SalesOrchestrator:
 
         rag_results = []
         tool_text = ""
+        mcp_text = ""
 
         if intent in ("RAG", "BOTH"):
             try:
@@ -100,14 +102,29 @@ class SalesOrchestrator:
             except Exception as e:
                 logger.error("JSearch tool failed in orchestrator: %s", e, exc_info=True)
 
+        if intent == "MCP":
+            try:
+                from app.mcp.github_tools import run_github_tools
+
+                mcp_text = await run_github_tools(question)
+                if mcp_text:
+                    logger.info("GitHub MCP returned live data (%d chars).", len(mcp_text))
+            except Exception as exc:
+                logger.warning("GitHub MCP tool run failed: %s", exc)
+
         sources = _clean_sources(rag_results)
         yield {
             "event": ChatEventType.SOURCES.value,
-            "data": {"sources": sources, "intent": intent, "tool_text": tool_text},
+            "data": {
+                "sources": sources,
+                "intent": intent,
+                "tool_text": tool_text,
+                "mcp_text": mcp_text,
+            },
         }
 
         prompt = self.prompt_builder.build_router_prompt(
-            question, rag_results, tool_text, decision
+            question, rag_results, tool_text, decision, mcp_text=mcp_text
         )
         logger.info("Final LLM prompt built (len=%d chars).", len(prompt))
 
