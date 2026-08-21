@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.database import close_client
 from app.routes.chat_router import router as chat_router
 from app.routes.dashboard_router import router as dashboard_router
+from app.routes.github_oauth import router as github_oauth_router
 from app.routes.profile_router import router as profile_router
 
 logging.basicConfig(level=logging.INFO)
@@ -79,6 +80,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(github_oauth_router)
 app.include_router(chat_router)
 app.include_router(profile_router)
 app.include_router(dashboard_router)

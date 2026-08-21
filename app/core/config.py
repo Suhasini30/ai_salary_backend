@@ -23,6 +23,13 @@ class Settings:
         self.MISTRAL_API_KEY = _clean_env(os.getenv("MISTRAL_API_KEY"))
 
         # GitHub OAuth & MCP
+        self.GITHUB_CLIENT_ID = _clean_env(os.getenv("GITHUB_CLIENT_ID"))
+        self.GITHUB_CLIENT_SECRET = _clean_env(os.getenv("GITHUB_CLIENT_SECRET"))
+        self.GITHUB_REDIRECT_URI = (
+            _clean_env(os.getenv("GITHUB_REDIRECT_URI"))
+            or _clean_env(os.getenv("GITHUB_OAUTH_CALLBACK_URL"))
+            or f"{os.getenv('API_BASE_URL', 'http://127.0.0.1:8000')}/api/auth/github/callback"
+        )
         self.GITHUB_PAT = _clean_env(os.getenv("GITHUB_PAT"))
         self.GITHUB_MCP_SERVER_URL = _clean_env(os.getenv("GITHUB_MCP_SERVER_URL")) or "https://api.githubcopilot.com/mcp/"
 

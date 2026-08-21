@@ -105,8 +105,17 @@ class SalesOrchestrator:
         if intent == "MCP":
             try:
                 from app.mcp.github_tools import run_github_tools
+                from app.repos import profiles_repo
 
-                mcp_text = await run_github_tools(question)
+                github_token = None
+                if user is not None:
+                    user_id = str(user.id) if hasattr(user, "id") else str(user.get("id")) if isinstance(user, dict) else None
+                    if user_id:
+                        oauth_info = await profiles_repo.get_github_oauth(user_id)
+                        if oauth_info:
+                            github_token = oauth_info.get("access_token")
+
+                mcp_text = await run_github_tools(question, github_token=github_token)
                 if mcp_text:
                     logger.info("GitHub MCP returned live data (%d chars).", len(mcp_text))
             except Exception as exc:
